@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Search, Plus, Pencil, Trash2, X, Users, RefreshCw } from "lucide-react";
 import api from "./services/api";
 
@@ -13,6 +13,13 @@ interface Student {
     name: string;
     section: string;
   };
+  guardianIds?: ({ _id: string; name: string; email: string } | string)[];
+}
+
+interface Guardian {
+  _id: string;
+  name: string;
+  email: string;
 }
 
 interface SchoolClass {
@@ -27,11 +34,13 @@ const emptyForm = {
   name: "",
   dateOfBirth: "",
   classId: "",
+  guardianIds: [] as string[],
 };
 
 export default function Students({ canManage = true }: { canManage?: boolean }) {
   const [students, setStudents] = useState<Student[]>([]);
   const [classes, setClasses] = useState<SchoolClass[]>([]);
+  const [guardians, setGuardians] = useState<Guardian[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -40,28 +49,29 @@ export default function Students({ canManage = true }: { canManage?: boolean }) 
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
 
-  const fetchData = async () => {
-    setLoading(true);
-    setError("");
-
+  const fetchData = useCallback(async () => {
     try {
-      const [studentResponse, classResponse] = await Promise.all([
+      const requests = [
         api.get("/academic/students"),
         api.get("/academic/classes"),
-      ]);
+        ...(canManage ? [api.get("/academic/guardians")] : []),
+      ];
+      const [studentResponse, classResponse, guardianResponse] = await Promise.all(requests);
 
       setStudents(studentResponse.data.data);
       setClasses(classResponse.data.data);
+      if (guardianResponse) setGuardians(guardianResponse.data.data);
+      setError("");
     } catch (err: any) {
       setError(err.response?.data?.message || "Failed to load students.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [canManage]);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    void fetchData();
+  }, [fetchData]);
 
   const filteredStudents = useMemo(() => {
     const query = search.toLowerCase();
@@ -89,6 +99,9 @@ export default function Students({ canManage = true }: { canManage?: boolean }) 
         ? student.dateOfBirth.substring(0, 10)
         : "",
       classId: student.classId?._id || "",
+      guardianIds: student.guardianIds?.map((guardian) =>
+        typeof guardian === "string" ? guardian : guardian._id
+      ) || [],
     });
     setError("");
     setShowModal(true);
@@ -145,6 +158,31 @@ export default function Students({ canManage = true }: { canManage?: boolean }) 
         </div>
 
         {canManage && (
+          <fieldset>
+            <legend className="mb-2 text-sm font-medium text-slate-700">Linked guardians</legend>
+            <div className="max-h-32 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3">
+              {guardians.length === 0 ? (
+                <p className="text-xs text-slate-400">No active guardian accounts. Create one through the admin registration API first.</p>
+              ) : guardians.map((guardian) => (
+                <label key={guardian._id} className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={form.guardianIds.includes(guardian._id)}
+                    onChange={(event) => setForm({
+                      ...form,
+                      guardianIds: event.target.checked
+                        ? [...form.guardianIds, guardian._id]
+                        : form.guardianIds.filter((id) => id !== guardian._id),
+                    })}
+                  />
+                  {guardian.name} <span className="text-xs text-slate-400">{guardian.email}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
+
+        {canManage && (
           <button
             onClick={openAddModal}
             className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-lg hover:bg-indigo-700"
@@ -198,7 +236,11 @@ export default function Students({ canManage = true }: { canManage?: boolean }) 
           </div>
 
           <button
-            onClick={fetchData}
+            onClick={() => {
+              setLoading(true);
+              setError("");
+              void fetchData();
+            }}
             className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
             title="Refresh"
           >
@@ -281,7 +323,7 @@ export default function Students({ canManage = true }: { canManage?: boolean }) 
 
                             <button
                               onClick={() => handleDelete(student._id)}
-                              title="Delete"
+                              title="Archive student"
                               className="rounded-lg p-2 text-rose-600 hover:bg-rose-50"
                             >
                               <Trash2 size={17} />

@@ -21,14 +21,55 @@ const navigation = [
   { name: "Fee Management", icon: Wallet, roles: ["ADMIN", "GUARDIAN"] },
 ];
 
-// const students = [
-//   { name: "Aarav Sharma", id: "STU-2026-001", className: "Class 10-A", status: "Active", initials: "AS", color: "bg-indigo-100 text-indigo-700" },
-//   { name: "Ananya Verma", id: "STU-2026-002", className: "Class 9-B", status: "Active", initials: "AV", color: "bg-pink-100 text-pink-700" },
-//   { name: "Arjun Singh", id: "STU-2026-003", className: "Class 12-A", status: "Pending", initials: "AS", color: "bg-amber-100 text-amber-700" },
-//   { name: "Meera Kapoor", id: "STU-2026-004", className: "Class 8-C", status: "Active", initials: "MK", color: "bg-emerald-100 text-emerald-700" },
-// ];
+type NavigationItem = (typeof navigation)[number];
 
+function SidebarContent({ currentUser, visibleNavigation, active, onNavigate }: {
+  currentUser: LoginUser;
+  visibleNavigation: NavigationItem[];
+  active: string;
+  onNavigate: (name: string) => void;
+}) {
+  return (
+    <>
+      <div className="flex items-center gap-3 px-6 py-7">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-lg shadow-indigo-900/20">
+          <GraduationCap size={25} />
+        </div>
+        <div>
+          <h1 className="text-xl font-extrabold tracking-tight text-white">EduSphere</h1>
+          <p className="text-[10px] font-semibold uppercase tracking-[2px] text-slate-400">School Management</p>
+        </div>
+      </div>
 
+      <div className="px-4 pt-5">
+        <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[1.8px] text-slate-500">Main Menu</p>
+        <div className="space-y-1">
+          {visibleNavigation.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.name}
+                onClick={() => onNavigate(item.name)}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition ${
+                  active === item.name
+                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-950/30"
+                    : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                }`}
+              >
+                <Icon size={18} />
+                {item.name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-auto p-4">
+        <p className="px-3 py-4 text-xs text-slate-500">Signed in as {currentUser.role.toLowerCase()}</p>
+      </div>
+    </>
+  );
+}
 
 function App() {
   const [currentYear] = useState(() => new Date().getFullYear());
@@ -176,65 +217,11 @@ function App() {
 
   const visibleNavigation = navigation.filter((item) => item.roles.includes(currentUser.role));
 
-  const SidebarContent = () => (
-    <>
-      <div className="flex items-center gap-3 px-6 py-7">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-lg shadow-indigo-900/20">
-          <GraduationCap size={25} />
-        </div>
-        <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-white">EduSphere</h1>
-          <p className="text-[10px] font-semibold uppercase tracking-[2px] text-slate-400">School Management</p>
-        </div>
-      </div>
-
-      {dashboardError && (
-        <div role="alert" className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-          {dashboardError}
-        </div>
-      )}
-
-      <div className="px-4 pt-5">
-        <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[1.8px] text-slate-500">
-          Main Menu
-        </p>
-
-        <div className="space-y-1">
-          {visibleNavigation.map((item) => {
-            const Icon = item.icon;
-            const selected = active === item.name;
-
-            return (
-              <button
-                key={item.name}
-                onClick={() => {
-                  setActive(item.name);
-                  setMobileOpen(false);
-                }}
-                className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition ${selected
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-950/30"
-                  : "text-slate-400 hover:bg-slate-800 hover:text-white"
-                  }`}
-              >
-                <Icon size={18} />
-                {item.name}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="mt-auto p-4">
-        <p className="px-3 py-4 text-xs text-slate-500">Signed in as {currentUser.role.toLowerCase()}</p>
-      </div>
-    </>
-  );
-
   return (
     <div className="min-h-screen bg-[#F7F8FC] text-slate-800">
       {/* Desktop Sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[260px] flex-col bg-[#151B35] lg:flex">
-        <SidebarContent />
+        <SidebarContent currentUser={currentUser} visibleNavigation={visibleNavigation} active={active} onNavigate={setActive} />
       </aside>
 
       {/* Mobile Sidebar */}
@@ -253,7 +240,15 @@ function App() {
             >
               <X size={22} />
             </button>
-            <SidebarContent />
+            <SidebarContent
+              currentUser={currentUser}
+              visibleNavigation={visibleNavigation}
+              active={active}
+              onNavigate={(name) => {
+                setActive(name);
+                setMobileOpen(false);
+              }}
+            />
           </aside>
         </div>
       )}
@@ -315,6 +310,12 @@ function App() {
                   Here's what's happening at your school today.
                 </p>
               </div>
+
+              {dashboardError && (
+                <div role="alert" className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+                  {dashboardError}
+                </div>
+              )}
 
               <button
                 onClick={() => setActive("Students")}
@@ -574,7 +575,7 @@ function App() {
           </div>
         ) : (
           <div className="mx-auto max-w-[1600px] p-5 md:p-8">
-            <ManagementPages page={active as "Teachers" | "Classes & Subjects" | "Attendance" | "Examinations" | "Results" | "Fee Management"} role={currentUser.role} />
+            <ManagementPages key={active} page={active as "Teachers" | "Classes & Subjects" | "Attendance" | "Examinations" | "Results" | "Fee Management"} role={currentUser.role} />
           </div>
         )}
       </main>

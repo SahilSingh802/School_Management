@@ -27,9 +27,10 @@ export const registerUser = async (req, res) => {
     }
 
     const { name, email, password, role } = validation.data;
+    const normalizedEmail = email.toLowerCase();
 
     // Check existing user
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: normalizedEmail });
 
     if (existingUser) {
       return res.status(409).json({
@@ -44,7 +45,7 @@ export const registerUser = async (req, res) => {
     // Create user
     const user = await User.create({
       name,
-      email,
+      email: normalizedEmail,
       password: hashedPassword,
       role,
     });

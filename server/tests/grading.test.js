@@ -9,7 +9,7 @@ describe("calculateGrade", () => {
     [60, "C"],
     [40, "D"],
     [39.99, "F"],
-  ])("returns %s grade at percentage %s", (percentage, grade) => {
+  ])("maps percentage %s to grade %s", (percentage, grade) => {
     expect(calculateGrade(percentage)).toBe(grade);
   });
 });

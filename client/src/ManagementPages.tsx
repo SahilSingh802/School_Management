@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Plus, RefreshCw, Pencil, Trash2, Check } from "lucide-react";
 import api from "./services/api";
 
@@ -137,9 +137,7 @@ export default function ManagementPages({ page, role }: { page: Page; role: Role
     feeId: "", amount: "", paymentMethod: "CASH", transactionId: "",
   });
 
-  const refresh = async () => {
-    setLoading(true);
-    setError("");
+  const refresh = useCallback(async () => {
     try {
       if (page === "Teachers") {
         const [teacherResponse, classResponse, subjectResponse] = await Promise.all([
@@ -186,17 +184,17 @@ export default function ManagementPages({ page, role }: { page: Page; role: Role
           setStudents(studentResponse.data.data);
         }
       }
+      setError("");
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, role]);
 
   useEffect(() => {
-    setNotice("");
     void refresh();
-  }, [page, role]);
+  }, [refresh]);
 
   useEffect(() => {
     if (page !== "Attendance" || !selectedClassId) return;
@@ -241,7 +239,11 @@ export default function ManagementPages({ page, role }: { page: Page; role: Role
           <h1 className="text-2xl font-extrabold text-slate-900">{heading}</h1>
           <p className="mt-1 text-sm text-slate-500">Manage school records using live data from the school database.</p>
         </div>
-        <button onClick={() => void refresh()} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+        <button onClick={() => {
+          setLoading(true);
+          setError("");
+          void refresh();
+        }} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
           <RefreshCw size={16} /> Refresh
         </button>
       </div>

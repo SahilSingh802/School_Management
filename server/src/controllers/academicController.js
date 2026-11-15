@@ -102,7 +102,17 @@ export const deleteClass = async (req, res) => {
 // SUBJECT APIs
 export const createSubject = async (req, res) => {
   try {
-    const subject = await Subject.create(req.body);
+    const { name, code, classes = [] } = req.body;
+    if (!Array.isArray(classes) || classes.some((id) => !mongoose.isValidObjectId(id))) {
+      return res.status(400).json({ success: false, message: "Invalid class IDs" });
+    }
+
+    const validClasses = await Class.find({ _id: { $in: classes } }).select("_id");
+    if (validClasses.length !== new Set(classes.map(String)).size) {
+      return res.status(400).json({ success: false, message: "One or more classes are invalid" });
+    }
+
+    const subject = await Subject.create({ name, code, classes });
     res.status(201).json({ success: true, data: subject });
   } catch (error) {
     res.status(error.code === 11000 ? 409 : 400).json({
@@ -342,9 +352,11 @@ export const getStudents = async (req, res) => {
     filter.classId = { $in: teacher.assignedClasses };
   }
 
-  const students = await Student.find(filter)
-    .populate("classId")
-    .sort({ createdAt: -1 });
+  let studentQuery = Student.find(filter).populate("classId");
+  if (req.user.role === "ADMIN") {
+    studentQuery = studentQuery.populate("guardianIds", "name email");
+  }
+  const students = await studentQuery.sort({ createdAt: -1 });
 
   res.json({ success: true, data: students });
 };
@@ -489,6 +501,13 @@ export const getTeachers = async (req, res) => {
       message: error.message,
     });
   }
+};
+
+export const getGuardians = async (req, res) => {
+  const guardians = await User.find({ role: "GUARDIAN", isActive: true })
+    .select("name email")
+    .sort({ name: 1 });
+  res.json({ success: true, data: guardians });
 };
 
 

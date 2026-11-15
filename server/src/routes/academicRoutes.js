@@ -16,6 +16,7 @@ import {
   getStudents,
   createTeacher,
   getTeachers,
+  getGuardians,
   updateStudent,
   deleteStudent,
   updateTeacher,
@@ -45,5 +46,6 @@ router.get("/teachers", authorize("ADMIN"), getTeachers);
 router.post("/teachers", authorize("ADMIN"), createTeacher);
 router.put("/teachers/:id", authorize("ADMIN"), updateTeacher);
 router.delete("/teachers/:id", authorize("ADMIN"), deleteTeacher);
+router.get("/guardians", authorize("ADMIN"), getGuardians);
 
 export default router;
