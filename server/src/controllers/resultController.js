@@ -157,6 +157,95 @@ export const getResults = async (req, res) => {
   }
 };
 
+export const getStudentReportCard = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    if (!/^[a-f\d]{24}$/i.test(studentId)) {
+      return res.status(400).json({ success: false, message: "Invalid student ID" });
+    }
+
+    const student = await Student.findById(studentId)
+      .select("name admissionNo dateOfBirth classId guardianIds isActive")
+      .populate("classId", "name section academicYear");
+
+    if (!student) {
+      return res.status(404).json({ success: false, message: "Student not found" });
+    }
+
+    if (req.user.role === "GUARDIAN" &&
+        !student.guardianIds.some((guardianId) => String(guardianId) === req.user.id)) {
+      return res.status(403).json({ success: false, message: "You cannot access this student's report card" });
+    }
+
+    let visibleExams;
+    if (req.user.role === "TEACHER") {
+      const teacher = await Teacher.findOne({ userId: req.user.id }).select("assignedClasses subjects");
+      if (!teacher) {
+        return res.status(403).json({ success: false, message: "Teacher profile not found" });
+      }
+
+      visibleExams = await Exam.find({
+        classId: student.classId._id,
+        subjectId: { $in: teacher.subjects },
+      }).select("_id");
+      if (!teacher.assignedClasses.some((classId) => String(classId) === String(student.classId._id))) {
+        return res.status(403).json({ success: false, message: "You are not assigned to this student's class" });
+      }
+    }
+
+    const resultFilter = { studentId: student._id };
+    if (visibleExams) resultFilter.examId = { $in: visibleExams.map((exam) => exam._id) };
+
+    const results = await Result.find(resultFilter)
+      .populate({
+        path: "examId",
+        populate: { path: "subjectId", select: "name code" },
+      });
+    results.sort((left, right) => left.examId.date - right.examId.date);
+
+    const totalMarks = results.reduce((sum, result) => sum + result.marksObtained, 0);
+    const totalMaximumMarks = results.reduce((sum, result) => sum + result.examId.maxMarks, 0);
+    const overallPercentage = totalMaximumMarks
+      ? Number(((totalMarks / totalMaximumMarks) * 100).toFixed(2))
+      : 0;
+
+    return res.json({
+      success: true,
+      data: {
+        student: {
+          id: student._id,
+          name: student.name,
+          admissionNo: student.admissionNo,
+          dateOfBirth: student.dateOfBirth,
+          class: student.classId,
+        },
+        examinations: results.map((result) => ({
+          examId: result.examId._id,
+          title: result.examId.title,
+          date: result.examId.date,
+          subject: result.examId.subjectId,
+          marksObtained: result.marksObtained,
+          maxMarks: result.examId.maxMarks,
+          percentage: result.percentage,
+          grade: result.grade,
+          remarks: result.remarks,
+        })),
+        summary: {
+          examinationCount: results.length,
+          totalMarks,
+          totalMaximumMarks,
+          overallPercentage,
+          overallGrade: totalMaximumMarks ? calculateGrade(overallPercentage) : null,
+        },
+        generatedAt: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error("Report Card Error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to generate report card" });
+  }
+};
+
 export const updateResult = async (req, res) => {
   try {
     const result = await Result.findById(req.params.id);

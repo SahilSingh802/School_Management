@@ -228,21 +228,12 @@ export const recordPayment = async (req, res) => {
 // Get Fee Records
 export const getFees = async (req, res) => {
   try {
-    const filter = {};
-
-    if (req.user.role === "GUARDIAN") {
-      const students = await Student.find({
-        guardianIds: req.user.id,
-      }).select("_id");
-
-      filter.studentId = {
-        $in: students.map((student) => student._id),
-      };
-    } else if (req.query.studentId) {
-      filter.studentId = req.query.studentId;
+    const filter = await buildFeeFilter(req, "dueDate");
+    if (filter.error) {
+      return res.status(filter.error.status).json({ success: false, message: filter.error.message });
     }
 
-    const fees = await Fee.find(filter)
+    const fees = await Fee.find(filter.value)
       .populate("studentId", "name admissionNo classId")
       .sort({ createdAt: -1 });
 
@@ -263,25 +254,32 @@ export const getFees = async (req, res) => {
 // Get Payment History
 export const getPayments = async (req, res) => {
   try {
-    const filter = {};
-
-    if (req.user.role === "GUARDIAN") {
-      const students = await Student.find({
-        guardianIds: req.user.id,
-      }).select("_id");
-
-      filter.studentId = {
-        $in: students.map((student) => student._id),
-      };
-    } else {
-      if (req.query.studentId) {
-        filter.studentId = req.query.studentId;
-      }
-
-      if (req.query.feeId) {
-        filter.feeId = req.query.feeId;
-      }
+    const ownership = await getStudentOwnershipFilter(req);
+    if (ownership.error) {
+      return res.status(ownership.error.status).json({ success: false, message: ownership.error.message });
     }
+    const filter = { ...ownership.value };
+
+    if (req.query.feeId) {
+      if (!/^[a-f\d]{24}$/i.test(req.query.feeId)) {
+        return res.status(400).json({ success: false, message: "Invalid fee ID" });
+      }
+      filter.feeId = req.query.feeId;
+    }
+    if (req.query.paymentMethod) {
+      if (!["CASH", "UPI", "CARD", "BANK_TRANSFER"].includes(req.query.paymentMethod)) {
+        return res.status(400).json({ success: false, message: "Invalid payment method" });
+      }
+      filter.paymentMethod = req.query.paymentMethod;
+    }
+    const dateFilter = buildDateRange(
+      req.query.paymentFromDate || req.query.fromDate,
+      req.query.paymentToDate || req.query.toDate
+    );
+    if (dateFilter.error) {
+      return res.status(400).json({ success: false, message: dateFilter.error });
+    }
+    if (dateFilter.value) filter.paymentDate = dateFilter.value;
 
     const payments = await Payment.find(filter)
       .populate("studentId", "name admissionNo classId")
@@ -300,4 +298,167 @@ export const getPayments = async (req, res) => {
       message: "Failed to fetch payment history",
     });
   }
+};
+
+export const getFeeCollectionReport = async (req, res) => {
+  try {
+    const feeFilter = await buildFeeFilter(req, "dueDate");
+    if (feeFilter.error) {
+      return res.status(feeFilter.error.status).json({ success: false, message: feeFilter.error.message });
+    }
+    const invoices = await Fee.find(feeFilter.value).select("_id totalAmount paidAmount status academicYear feeType");
+    const feeIds = invoices.map((fee) => fee._id);
+    const dateFilter = buildDateRange(req.query.paymentFromDate, req.query.paymentToDate);
+    if (dateFilter.error) {
+      return res.status(400).json({ success: false, message: dateFilter.error });
+    }
+
+    const paymentMatch = { feeId: { $in: feeIds } };
+    if (dateFilter.value) paymentMatch.paymentDate = dateFilter.value;
+    const [paymentSummary] = await Payment.aggregate([
+      { $match: paymentMatch },
+      {
+        $group: {
+          _id: null,
+          collected: { $sum: "$amount" },
+          paymentCount: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const report = invoices.reduce((summary, invoice) => {
+      summary.totalInvoiced += invoice.totalAmount;
+      summary.currentlyPaid += invoice.paidAmount;
+      summary.outstanding += invoice.totalAmount - invoice.paidAmount;
+      summary.invoiceCount += 1;
+      return summary;
+    }, { totalInvoiced: 0, currentlyPaid: 0, outstanding: 0, invoiceCount: 0 });
+    const breakdown = [...invoices.reduce((groups, invoice) => {
+      const key = `${invoice.academicYear}\u0000${invoice.feeType}`;
+      const group = groups.get(key) || {
+        academicYear: invoice.academicYear,
+        feeType: invoice.feeType,
+        invoiceCount: 0,
+        totalInvoiced: 0,
+        currentlyPaid: 0,
+        outstanding: 0,
+      };
+      group.invoiceCount += 1;
+      group.totalInvoiced += invoice.totalAmount;
+      group.currentlyPaid += invoice.paidAmount;
+      group.outstanding += invoice.totalAmount - invoice.paidAmount;
+      groups.set(key, group);
+      return groups;
+    }, new Map()).values()];
+
+    return res.json({
+      success: true,
+      data: {
+        ...report,
+        breakdown,
+        collectedInPeriod: paymentSummary?.collected || 0,
+        paymentCountInPeriod: paymentSummary?.paymentCount || 0,
+        period: { fromDate: req.query.paymentFromDate || null, toDate: req.query.paymentToDate || null },
+      },
+    });
+  } catch (error) {
+    console.error("Fee Collection Report Error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to generate fee collection report" });
+  }
+};
+
+export const getOutstandingFeeReport = async (req, res) => {
+  try {
+    const feeFilter = await buildFeeFilter(req, "dueDate");
+    if (feeFilter.error) {
+      return res.status(feeFilter.error.status).json({ success: false, message: feeFilter.error.message });
+    }
+    const invoices = await Fee.find({
+      ...feeFilter.value,
+      $expr: { $lt: ["$paidAmount", "$totalAmount"] },
+    })
+      .populate("studentId", "name admissionNo classId")
+      .sort({ dueDate: 1 });
+    const summary = invoices.reduce((result, invoice) => {
+      result.invoiceCount += 1;
+      result.outstanding += invoice.totalAmount - invoice.paidAmount;
+      return result;
+    }, { invoiceCount: 0, outstanding: 0 });
+
+    return res.json({ success: true, data: { ...summary, invoices } });
+  } catch (error) {
+    console.error("Outstanding Fee Report Error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to generate outstanding fee report" });
+  }
+};
+
+const getStudentOwnershipFilter = async (req) => {
+  if (req.query.studentId && !/^[a-f\d]{24}$/i.test(req.query.studentId)) {
+    return { error: { status: 400, message: "Invalid student ID" } };
+  }
+
+  if (req.user.role === "GUARDIAN") {
+    const students = await Student.find({ guardianIds: req.user.id }).select("_id");
+    const linkedIds = students.map((student) => String(student._id));
+    if (req.query.studentId && !linkedIds.includes(req.query.studentId)) {
+      return { error: { status: 403, message: "You cannot access this student's fee information" } };
+    }
+    return { value: { studentId: req.query.studentId || { $in: students.map((student) => student._id) } } };
+  }
+
+  return { value: req.query.studentId ? { studentId: req.query.studentId } : {} };
+};
+
+const buildFeeFilter = async (req, dateField) => {
+  const ownership = await getStudentOwnershipFilter(req);
+  if (ownership.error) return ownership;
+
+  const filter = { ...ownership.value };
+  if (req.query.academicYear) {
+    filter.academicYear = req.query.academicYear;
+  }
+  if (req.query.feeType) {
+    filter.feeType = req.query.feeType;
+  }
+  if (req.query.status) {
+    if (!["PENDING", "PARTIAL", "PAID"].includes(req.query.status)) {
+      return { error: { status: 400, message: "Invalid fee status" } };
+    }
+    filter.status = req.query.status;
+  }
+  if (dateField) {
+    const dateFilter = buildDateRange(req.query.fromDate, req.query.toDate);
+    if (dateFilter.error) return { error: { status: 400, message: dateFilter.error } };
+    if (dateFilter.value) filter[dateField] = dateFilter.value;
+  }
+
+  return { value: filter };
+};
+
+const buildDateRange = (fromDate, toDate) => {
+  const parseDate = (value) => {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value
+      ? null
+      : parsed;
+  };
+  const start = fromDate ? parseDate(fromDate) : null;
+  const end = toDate ? parseDate(toDate) : null;
+  if ((fromDate && !start) || (toDate && !end)) {
+    return { error: "Invalid date range" };
+  }
+  if (start && end && start > end) {
+    return { error: "Start date must not be after end date" };
+  }
+  if (!start && !end) return { value: null };
+
+  const range = {};
+  if (start) range.$gte = start;
+  if (end) {
+    const exclusiveEnd = new Date(end);
+    exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1);
+    range.$lt = exclusiveEnd;
+  }
+  return { value: range };
 };

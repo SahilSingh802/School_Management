@@ -77,3 +77,151 @@ button, input, select {
 .icon-button:hover {
   background: #eef2ff;
 }
+
+.report-card-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  background: rgb(15 23 42 / 65%);
+  padding: 1.5rem;
+}
+
+.report-card-dialog {
+  width: min(100%, 900px);
+  border-radius: 1rem;
+  background: white;
+  padding: 1rem;
+}
+
+.report-card-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-bottom: 1rem;
+}
+
+.report-card-print {
+  padding: 2rem;
+  color: #0f172a;
+}
+
+.report-card-heading {
+  border-bottom: 2px solid #4f46e5;
+  padding-bottom: 1rem;
+  text-align: center;
+}
+
+.report-card-heading h1 {
+  font-size: 1.75rem;
+  font-weight: 800;
+}
+
+.report-card-heading p,
+.report-card-footer {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.report-card-student,
+.report-card-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.9rem;
+  padding: 1.25rem 0;
+}
+
+.report-card-student div,
+.report-card-summary div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.report-card-student strong,
+.report-card-summary strong {
+  color: #64748b;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.report-card-student span,
+.report-card-summary span {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.report-card-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.report-card-table th,
+.report-card-table td {
+  border: 1px solid #cbd5e1;
+  padding: 0.65rem;
+  text-align: left;
+}
+
+.report-card-table th {
+  background: #f1f5f9;
+}
+
+.report-card-empty {
+  padding: 2rem 0;
+  color: #64748b;
+}
+
+.report-card-summary {
+  border-top: 1px solid #cbd5e1;
+  border-bottom: 1px solid #cbd5e1;
+}
+
+.report-card-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 14mm;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .report-card-overlay,
+  .report-card-dialog,
+  .report-card-print,
+  .report-card-print * {
+    visibility: visible !important;
+  }
+
+  .report-card-overlay {
+    position: absolute;
+    inset: 0;
+    display: block;
+    overflow: visible;
+    background: white;
+    padding: 0;
+  }
+
+  .report-card-dialog {
+    width: 100%;
+    padding: 0;
+  }
+
+  .report-card-toolbar {
+    display: none !important;
+  }
+
+  .report-card-print {
+    padding: 0;
+  }
+}

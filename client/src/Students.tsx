@@ -29,6 +29,12 @@ interface SchoolClass {
   academicYear: string;
 }
 
+interface StudentPageData {
+  students: Student[];
+  classes: SchoolClass[];
+  guardians?: Guardian[];
+}
+
 const emptyForm = {
   admissionNo: "",
   name: "",
@@ -47,31 +53,61 @@ export default function Students({ canManage = true }: { canManage?: boolean }) 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [guardianForm, setGuardianForm] = useState({ name: "", email: "", password: "" });
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const loadData = useCallback(async (): Promise<StudentPageData> => {
+    const requests = [
+      api.get("/academic/students"),
+      api.get("/academic/classes"),
+      ...(canManage ? [api.get("/academic/guardians")] : []),
+    ];
+    const [studentResponse, classResponse, guardianResponse] = await Promise.all(requests);
+
+    return {
+      students: studentResponse.data.data,
+      classes: classResponse.data.data,
+      ...(guardianResponse ? { guardians: guardianResponse.data.data } : {}),
+    };
+  }, [canManage]);
+
+  const applyData = useCallback((data: StudentPageData) => {
+    setStudents(data.students);
+    setClasses(data.classes);
+    if (data.guardians) setGuardians(data.guardians);
+  }, []);
 
   const fetchData = useCallback(async () => {
     try {
-      const requests = [
-        api.get("/academic/students"),
-        api.get("/academic/classes"),
-        ...(canManage ? [api.get("/academic/guardians")] : []),
-      ];
-      const [studentResponse, classResponse, guardianResponse] = await Promise.all(requests);
-
-      setStudents(studentResponse.data.data);
-      setClasses(classResponse.data.data);
-      if (guardianResponse) setGuardians(guardianResponse.data.data);
+      applyData(await loadData());
       setError("");
     } catch (err: any) {
       setError(err.response?.data?.message || "Failed to load students.");
     } finally {
       setLoading(false);
     }
-  }, [canManage]);
+  }, [applyData, loadData]);
 
   useEffect(() => {
-    void fetchData();
-  }, [fetchData]);
+    let cancelled = false;
+    void loadData()
+      .then((data) => {
+        if (cancelled) return;
+        applyData(data);
+        setError("");
+      })
+      .catch((err: any) => {
+        if (!cancelled) setError(err.response?.data?.message || "Failed to load students.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyData, loadData]);
 
   const filteredStudents = useMemo(() => {
     const query = search.toLowerCase();
@@ -122,6 +158,7 @@ export default function Students({ canManage = true }: { canManage?: boolean }) 
       setShowModal(false);
       setForm(emptyForm);
       setEditingId(null);
+      setNotice(editingId ? "Student record updated." : "Student added.");
       await fetchData();
     } catch (err: any) {
       setError(err.response?.data?.message || "Unable to save student.");
@@ -139,9 +176,27 @@ export default function Students({ canManage = true }: { canManage?: boolean }) 
 
     try {
       await api.delete(`/academic/students/${id}`);
+      setNotice("Student archived; academic and fee history preserved.");
       await fetchData();
     } catch (err: any) {
       setError(err.response?.data?.message || "Unable to delete student.");
+    }
+  };
+
+  const createGuardian = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      await api.post("/auth/register", { ...guardianForm, role: "GUARDIAN" });
+      setGuardianForm({ name: "", email: "", password: "" });
+      setNotice("Guardian account created. You can now link it to a student.");
+      await fetchData();
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Unable to create guardian account.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -157,30 +212,8 @@ export default function Students({ canManage = true }: { canManage?: boolean }) 
           </p>
         </div>
 
-        {canManage && (
-          <fieldset>
-            <legend className="mb-2 text-sm font-medium text-slate-700">Linked guardians</legend>
-            <div className="max-h-32 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3">
-              {guardians.length === 0 ? (
-                <p className="text-xs text-slate-400">No active guardian accounts. Create one through the admin registration API first.</p>
-              ) : guardians.map((guardian) => (
-                <label key={guardian._id} className="flex items-center gap-2 text-sm text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={form.guardianIds.includes(guardian._id)}
-                    onChange={(event) => setForm({
-                      ...form,
-                      guardianIds: event.target.checked
-                        ? [...form.guardianIds, guardian._id]
-                        : form.guardianIds.filter((id) => id !== guardian._id),
-                    })}
-                  />
-                  {guardian.name} <span className="text-xs text-slate-400">{guardian.email}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        )}
+        {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+        {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
 
         {canManage && (
           <button
@@ -215,6 +248,27 @@ export default function Students({ canManage = true }: { canManage?: boolean }) 
           </h2>
         </div>
       </div>
+
+      {canManage && (
+        <form onSubmit={createGuardian} className="grid gap-4 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:grid-cols-2 xl:grid-cols-4">
+          <div className="sm:col-span-2 xl:col-span-4">
+            <h2 className="font-bold text-slate-900">Create guardian account</h2>
+            <p className="mt-1 text-xs text-slate-500">The account can be linked to students when adding or editing a student.</p>
+          </div>
+          <label className="space-y-1 text-xs font-semibold text-slate-600">Guardian name
+            <input required minLength={2} value={guardianForm.name} onChange={(event) => setGuardianForm({ ...guardianForm, name: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal" />
+          </label>
+          <label className="space-y-1 text-xs font-semibold text-slate-600">Email address
+            <input required type="email" value={guardianForm.email} onChange={(event) => setGuardianForm({ ...guardianForm, email: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal" />
+          </label>
+          <label className="space-y-1 text-xs font-semibold text-slate-600">Initial password
+            <input required type="password" minLength={8} value={guardianForm.password} onChange={(event) => setGuardianForm({ ...guardianForm, password: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal" />
+          </label>
+          <button disabled={saving} className="self-end rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60">
+            {saving ? "Creating…" : "Create guardian"}
+          </button>
+        </form>
+      )}
 
       <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
@@ -428,6 +482,31 @@ export default function Students({ canManage = true }: { canManage?: boolean }) 
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-500"
                 />
               </div>
+
+              {canManage && (
+                <fieldset>
+                  <legend className="mb-2 text-sm font-medium text-slate-700">Linked guardians</legend>
+                  <div className="max-h-32 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3">
+                    {guardians.length === 0 ? (
+                      <p className="text-xs text-slate-400">Create a guardian account above before linking one.</p>
+                    ) : guardians.map((guardian) => (
+                      <label key={guardian._id} className="flex items-center gap-2 text-sm text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={form.guardianIds.includes(guardian._id)}
+                          onChange={(event) => setForm({
+                            ...form,
+                            guardianIds: event.target.checked
+                              ? [...form.guardianIds, guardian._id]
+                              : form.guardianIds.filter((id) => id !== guardian._id),
+                          })}
+                        />
+                        {guardian.name} <span className="text-xs text-slate-400">{guardian.email}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
 
               <div className="flex justify-end gap-3 pt-3">
                 <button

@@ -3,6 +3,7 @@ import express from "express";
 import {
   createResult,
   getResults,
+  getStudentReportCard,
   updateResult,
 } from "../controllers/resultController.js";
 
@@ -23,6 +24,12 @@ router.get(
   "/",
   authorize("ADMIN", "TEACHER", "GUARDIAN"),
   getResults
+);
+
+router.get(
+  "/students/:studentId/report-card",
+  authorize("ADMIN", "TEACHER", "GUARDIAN"),
+  getStudentReportCard
 );
 
 router.put("/:id", authorize("ADMIN", "TEACHER"), updateResult);

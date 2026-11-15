@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, RefreshCw, Pencil, Trash2, Check } from "lucide-react";
+import { Plus, RefreshCw, Pencil, Trash2, Check, Download } from "lucide-react";
 import api from "./services/api";
+import PrintableReportCard from "./PrintableReportCard";
 
 type Role = "ADMIN" | "TEACHER" | "GUARDIAN";
 type Page = "Teachers" | "Classes & Subjects" | "Attendance" | "Examinations" | "Results" | "Fee Management";
@@ -83,6 +84,43 @@ interface Attendance {
   status: "PRESENT" | "ABSENT" | "LATE";
 }
 
+interface FeeCollectionReport {
+  totalInvoiced: number;
+  currentlyPaid: number;
+  outstanding: number;
+  invoiceCount: number;
+  collectedInPeriod: number;
+  paymentCountInPeriod: number;
+  breakdown: {
+    academicYear: string;
+    feeType: string;
+    invoiceCount: number;
+    totalInvoiced: number;
+    currentlyPaid: number;
+    outstanding: number;
+  }[];
+}
+
+interface OutstandingReport {
+  invoiceCount: number;
+  outstanding: number;
+  invoices: Fee[];
+}
+
+interface ManagementPageData {
+  teachers?: Teacher[];
+  classes?: SchoolClass[];
+  subjects?: Subject[];
+  students?: Student[];
+  exams?: Exam[];
+  results?: Result[];
+  fees?: Fee[];
+  payments?: Payment[];
+  collectionReport?: FeeCollectionReport;
+  outstandingReport?: OutstandingReport;
+  attendance?: Attendance[];
+}
+
 const errorMessage = (error: unknown) => {
   if (typeof error === "object" && error !== null && "response" in error) {
     const response = (error as { response?: { data?: { message?: string } } }).response;
@@ -108,6 +146,8 @@ export default function ManagementPages({ page, role }: { page: Page; role: Role
   const [results, setResults] = useState<Result[]>([]);
   const [fees, setFees] = useState<Fee[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [collectionReport, setCollectionReport] = useState<FeeCollectionReport | null>(null);
+  const [outstandingReport, setOutstandingReport] = useState<OutstandingReport | null>(null);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -125,6 +165,9 @@ export default function ManagementPages({ page, role }: { page: Page; role: Role
   const [selectedClassId, setSelectedClassId] = useState("");
   const [selectedDate, setSelectedDate] = useState(today);
   const [session, setSession] = useState("MORNING");
+  const [attendanceFromDate, setAttendanceFromDate] = useState("");
+  const [attendanceToDate, setAttendanceToDate] = useState("");
+  const [attendanceStatus, setAttendanceStatus] = useState("");
   const [attendanceDraft, setAttendanceDraft] = useState<Record<string, Attendance["status"]>>({});
   const [examForm, setExamForm] = useState({
     title: "", classId: "", subjectId: "", date: today, maxMarks: "100", passMarks: "40",
@@ -136,71 +179,140 @@ export default function ManagementPages({ page, role }: { page: Page; role: Role
   const [paymentForm, setPaymentForm] = useState({
     feeId: "", amount: "", paymentMethod: "CASH", transactionId: "",
   });
+  const [feeFilterDraft, setFeeFilterDraft] = useState({
+    studentId: "", academicYear: "", status: "", feeType: "",
+    fromDate: "", toDate: "", paymentFromDate: "", paymentToDate: "", paymentMethod: "",
+  });
+  const [activeFeeFilters, setActiveFeeFilters] = useState(feeFilterDraft);
 
-  const refresh = useCallback(async () => {
-    try {
+  const loadPageData = useCallback(async (): Promise<ManagementPageData> => {
       if (page === "Teachers") {
         const [teacherResponse, classResponse, subjectResponse] = await Promise.all([
           api.get("/academic/teachers"), api.get("/academic/classes"), api.get("/academic/subjects"),
         ]);
-        setTeachers(teacherResponse.data.data);
-        setClasses(classResponse.data.data);
-        setSubjects(subjectResponse.data.data);
+        return {
+          teachers: teacherResponse.data.data,
+          classes: classResponse.data.data,
+          subjects: subjectResponse.data.data,
+        };
       } else if (page === "Classes & Subjects") {
         const [classResponse, subjectResponse] = await Promise.all([
           api.get("/academic/classes"), api.get("/academic/subjects"),
         ]);
-        setClasses(classResponse.data.data);
-        setSubjects(subjectResponse.data.data);
+        return { classes: classResponse.data.data, subjects: subjectResponse.data.data };
       } else if (page === "Attendance") {
         const [classResponse, studentResponse, attendanceResponse] = await Promise.all([
           api.get("/academic/classes"), api.get("/academic/students"), api.get("/attendance"),
         ]);
-        setClasses(classResponse.data.data);
-        setStudents(studentResponse.data.data);
-        setAttendance(attendanceResponse.data.data);
+        return {
+          classes: classResponse.data.data,
+          students: studentResponse.data.data,
+          attendance: attendanceResponse.data.data,
+        };
       } else if (page === "Examinations") {
         const [classResponse, subjectResponse, examResponse] = await Promise.all([
           api.get("/academic/classes"), api.get("/academic/subjects"), api.get("/exams"),
         ]);
-        setClasses(classResponse.data.data);
-        setSubjects(subjectResponse.data.data);
-        setExams(examResponse.data.data);
+        return {
+          classes: classResponse.data.data,
+          subjects: subjectResponse.data.data,
+          exams: examResponse.data.data,
+        };
       } else if (page === "Results") {
         const [studentResponse, examResponse, resultResponse] = await Promise.all([
           api.get("/academic/students"), api.get("/exams"), api.get("/results"),
         ]);
-        setStudents(studentResponse.data.data);
-        setExams(examResponse.data.data);
-        setResults(resultResponse.data.data);
+        return {
+          students: studentResponse.data.data,
+          exams: examResponse.data.data,
+          results: resultResponse.data.data,
+        };
       } else {
-        const [feeResponse, paymentResponse] = await Promise.all([
-          api.get("/fees"), api.get("/fees/payments"),
+        const [feeResponse, paymentResponse, collectionResponse, outstandingResponse] = await Promise.all([
+          api.get("/fees", { params: activeFeeFilters }),
+          api.get("/fees/payments", { params: {
+            studentId: activeFeeFilters.studentId || undefined,
+            paymentFromDate: activeFeeFilters.paymentFromDate || undefined,
+            paymentToDate: activeFeeFilters.paymentToDate || undefined,
+            paymentMethod: activeFeeFilters.paymentMethod || undefined,
+          } }),
+          api.get("/fees/reports/collection", { params: activeFeeFilters }),
+          api.get("/fees/reports/outstanding", { params: activeFeeFilters }),
         ]);
-        setFees(feeResponse.data.data);
-        setPayments(paymentResponse.data.data);
+        let students: Student[] | undefined;
         if (role === "ADMIN") {
           const studentResponse = await api.get("/academic/students");
-          setStudents(studentResponse.data.data);
+          students = studentResponse.data.data;
         }
+        return {
+          fees: feeResponse.data.data,
+          payments: paymentResponse.data.data,
+          collectionReport: collectionResponse.data.data,
+          outstandingReport: outstandingResponse.data.data,
+          ...(students ? { students } : {}),
+        };
       }
+  }, [page, role, activeFeeFilters]);
+
+  const applyPageData = useCallback((data: ManagementPageData) => {
+    if (data.teachers) setTeachers(data.teachers);
+    if (data.classes) setClasses(data.classes);
+    if (data.subjects) setSubjects(data.subjects);
+    if (data.students) setStudents(data.students);
+    if (data.exams) setExams(data.exams);
+    if (data.results) setResults(data.results);
+    if (data.fees) setFees(data.fees);
+    if (data.payments) setPayments(data.payments);
+    if (data.collectionReport) setCollectionReport(data.collectionReport);
+    if (data.outstandingReport) setOutstandingReport(data.outstandingReport);
+    if (data.attendance) setAttendance(data.attendance);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      applyPageData(await loadPageData());
       setError("");
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
       setLoading(false);
     }
-  }, [page, role]);
+  }, [applyPageData, loadPageData]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let cancelled = false;
+    void loadPageData()
+      .then((data) => {
+        if (cancelled) return;
+        applyPageData(data);
+        setError("");
+      })
+      .catch((requestError: unknown) => {
+        if (!cancelled) setError(errorMessage(requestError));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyPageData, loadPageData]);
 
   useEffect(() => {
     if (page !== "Attendance" || !selectedClassId) return;
+    let cancelled = false;
     api.get("/attendance", { params: { classId: selectedClassId, date: selectedDate } })
-      .then((response) => setAttendance(response.data.data))
-      .catch((requestError: unknown) => setError(errorMessage(requestError)));
+      .then((response) => {
+        if (!cancelled) setAttendance(response.data.data);
+      })
+      .catch((requestError: unknown) => {
+        if (!cancelled) setError(errorMessage(requestError));
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [page, selectedClassId, selectedDate]);
 
   const runSave = async (action: () => Promise<void>, successMessage: string) => {
@@ -231,6 +343,7 @@ export default function ManagementPages({ page, role }: { page: Page; role: Role
     Results: "Results",
     "Fee Management": "Fee Management",
   }[page];
+  const reportStudents = [...new Map(results.map((result) => [result.studentId._id, result.studentId])).values()];
 
   return (
     <div className="space-y-6">
@@ -354,6 +467,28 @@ export default function ManagementPages({ page, role }: { page: Page; role: Role
             <Field label="Date"><input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} /></Field>
             {role !== "GUARDIAN" && <Field label="Session"><select value={session} onChange={(e) => setSession(e.target.value)}><option>MORNING</option><option>AFTERNOON</option></select></Field>}
           </div>
+          <div className="grid items-end gap-3 sm:grid-cols-4">
+            <Field label="Report from"><input type="date" value={attendanceFromDate} onChange={(event) => setAttendanceFromDate(event.target.value)} /></Field>
+            <Field label="Report to"><input type="date" value={attendanceToDate} onChange={(event) => setAttendanceToDate(event.target.value)} /></Field>
+            <Field label="Status filter"><select value={attendanceStatus} onChange={(event) => setAttendanceStatus(event.target.value)}><option value="">All statuses</option><option>PRESENT</option><option>ABSENT</option><option>LATE</option></select></Field>
+            <button type="button" className="primary-button" onClick={async () => {
+              setError("");
+              try {
+                const response = await api.get("/attendance/export.csv", {
+                  params: {
+                    classId: role === "GUARDIAN" ? undefined : selectedClassId || undefined,
+                    fromDate: attendanceFromDate || undefined,
+                    toDate: attendanceToDate || undefined,
+                    status: attendanceStatus || undefined,
+                  },
+                  responseType: "blob",
+                });
+                downloadBlob(response.data, "attendance-report.csv", "text/csv");
+              } catch (requestError) {
+                setError(errorMessage(requestError));
+              }
+            }}><Download size={16} />Export CSV</button>
+          </div>
           {role !== "GUARDIAN" && selectedClassId ? (
             <div className="space-y-4">
               <DataTable loading={loading} headers={["Student", "Admission number", "Status"]} empty={!students.filter((student) => idOf(student.classId) === selectedClassId).length}>
@@ -451,11 +586,61 @@ export default function ManagementPages({ page, role }: { page: Page; role: Role
               }}><Pencil size={16} /></button></Cell>}
             </tr>)}
           </DataTable>
+          {!!reportStudents.length && (
+            <section className="space-y-3">
+              <h2 className="font-bold text-slate-800">Printable student report cards</h2>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {reportStudents.map((student) => (
+                  <div key={student._id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{student.name}</p>
+                      <p className="mt-1 text-xs text-slate-500">{student.admissionNo}</p>
+                    </div>
+                    <PrintableReportCard studentId={student._id} />
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       )}
 
       {page === "Fee Management" && (
         <div className="space-y-6">
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            setLoading(true);
+            setActiveFeeFilters({ ...feeFilterDraft });
+          }} className="grid gap-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:grid-cols-2 xl:grid-cols-4">
+            <h2 className="font-bold text-slate-800 sm:col-span-2 xl:col-span-4">Filter fee reports</h2>
+            {role === "ADMIN" && <Field label="Student"><select value={feeFilterDraft.studentId} onChange={(event) => setFeeFilterDraft({ ...feeFilterDraft, studentId: event.target.value })}><option value="">All students</option>{students.map((student) => <option key={student._id} value={student._id}>{student.name} ({student.admissionNo})</option>)}</select></Field>}
+            <Field label="Academic year"><input value={feeFilterDraft.academicYear} onChange={(event) => setFeeFilterDraft({ ...feeFilterDraft, academicYear: event.target.value })} placeholder="e.g. 2026-27" /></Field>
+            <Field label="Fee category"><input value={feeFilterDraft.feeType} onChange={(event) => setFeeFilterDraft({ ...feeFilterDraft, feeType: event.target.value })} placeholder="All categories" /></Field>
+            <Field label="Invoice status"><select value={feeFilterDraft.status} onChange={(event) => setFeeFilterDraft({ ...feeFilterDraft, status: event.target.value })}><option value="">All statuses</option><option>PENDING</option><option>PARTIAL</option><option>PAID</option></select></Field>
+            <Field label="Invoice due from"><input type="date" value={feeFilterDraft.fromDate} onChange={(event) => setFeeFilterDraft({ ...feeFilterDraft, fromDate: event.target.value })} /></Field>
+            <Field label="Invoice due to"><input type="date" value={feeFilterDraft.toDate} onChange={(event) => setFeeFilterDraft({ ...feeFilterDraft, toDate: event.target.value })} /></Field>
+            <Field label="Payment from"><input type="date" value={feeFilterDraft.paymentFromDate} onChange={(event) => setFeeFilterDraft({ ...feeFilterDraft, paymentFromDate: event.target.value })} /></Field>
+            <Field label="Payment to"><input type="date" value={feeFilterDraft.paymentToDate} onChange={(event) => setFeeFilterDraft({ ...feeFilterDraft, paymentToDate: event.target.value })} /></Field>
+            <Field label="Payment method"><select value={feeFilterDraft.paymentMethod} onChange={(event) => setFeeFilterDraft({ ...feeFilterDraft, paymentMethod: event.target.value })}><option value="">All methods</option><option>CASH</option><option>UPI</option><option>CARD</option><option>BANK_TRANSFER</option></select></Field>
+            <button disabled={saving} className="primary-button self-end"><Check size={16} />Apply filters</button>
+          </form>
+
+          {collectionReport && (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <SummaryCard label="Total invoiced" value={`₹${collectionReport.totalInvoiced.toLocaleString("en-IN")}`} />
+                <SummaryCard label="Collected (selected period)" value={`₹${collectionReport.collectedInPeriod.toLocaleString("en-IN")}`} />
+                <SummaryCard label="Currently paid" value={`₹${collectionReport.currentlyPaid.toLocaleString("en-IN")}`} />
+                <SummaryCard label="Outstanding balance" value={`₹${collectionReport.outstanding.toLocaleString("en-IN")}`} />
+              </div>
+              <DataTable loading={loading} headers={["Academic year", "Category", "Invoices", "Invoiced", "Paid", "Outstanding"]} empty={!collectionReport.breakdown.length}>
+                {collectionReport.breakdown.map((group) => <tr key={`${group.academicYear}-${group.feeType}`}>
+                  <Cell>{group.academicYear}</Cell><Cell>{group.feeType}</Cell><Cell>{group.invoiceCount}</Cell><Cell>₹{group.totalInvoiced.toLocaleString("en-IN")}</Cell><Cell>₹{group.currentlyPaid.toLocaleString("en-IN")}</Cell><Cell>₹{group.outstanding.toLocaleString("en-IN")}</Cell>
+                </tr>)}
+              </DataTable>
+            </>
+          )}
+
           {role === "ADMIN" && <div className="grid gap-6 xl:grid-cols-2">
             <form onSubmit={(event) => {
               event.preventDefault();
@@ -492,6 +677,19 @@ export default function ManagementPages({ page, role }: { page: Page; role: Role
               <Cell>{fee.studentId?.name}</Cell><Cell>{fee.feeType}</Cell><Cell>{fee.academicYear}</Cell><Cell>₹{fee.totalAmount.toLocaleString("en-IN")}</Cell><Cell>₹{fee.paidAmount.toLocaleString("en-IN")}</Cell><Cell>₹{(fee.totalAmount - fee.paidAmount).toLocaleString("en-IN")}</Cell><Cell>{fee.status}</Cell>
             </tr>)}
           </DataTable>
+          {outstandingReport && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-bold text-slate-800">Outstanding invoices</h2>
+                <p className="text-sm text-slate-500">{outstandingReport.invoiceCount} invoice(s) · ₹{outstandingReport.outstanding.toLocaleString("en-IN")}</p>
+              </div>
+              <DataTable loading={loading} headers={["Student", "Category", "Academic year", "Due date", "Outstanding", "Status"]} empty={!outstandingReport.invoices.length}>
+                {outstandingReport.invoices.map((fee) => <tr key={fee._id}>
+                  <Cell>{fee.studentId?.name}</Cell><Cell>{fee.feeType}</Cell><Cell>{fee.academicYear}</Cell><Cell>{new Date(fee.dueDate).toLocaleDateString()}</Cell><Cell>₹{(fee.totalAmount - fee.paidAmount).toLocaleString("en-IN")}</Cell><Cell>{fee.status}</Cell>
+                </tr>)}
+              </DataTable>
+            </section>
+          )}
           <section className="space-y-3">
             <h2 className="font-bold text-slate-800">Payment history</h2>
             <DataTable loading={loading} headers={["Date", "Student", "Fee category", "Method", "Transaction ID", "Amount"]} empty={!payments.length}>
@@ -516,6 +714,24 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <span>{label}</span>
     <div className="management-field">{children}</div>
   </label>;
+}
+
+function SummaryCard({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+    <p className="text-xs font-semibold text-slate-500">{label}</p>
+    <p className="mt-2 text-2xl font-extrabold text-slate-900">{value}</p>
+  </div>;
+}
+
+function downloadBlob(data: BlobPart, filename: string, type: string) {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function CheckList({ title, items, selected, onChange }: {

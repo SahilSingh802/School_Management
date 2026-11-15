@@ -6,6 +6,8 @@ import {
   recordPayment,
   getFees,
   getPayments,
+  getFeeCollectionReport,
+  getOutstandingFeeReport,
 } from "../controllers/feeController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
@@ -30,6 +32,18 @@ router.post(
 );
 
 // Admin and Guardian: View fee records
+router.get(
+  "/reports/collection",
+  authorize("ADMIN", "GUARDIAN"),
+  getFeeCollectionReport
+);
+
+router.get(
+  "/reports/outstanding",
+  authorize("ADMIN", "GUARDIAN"),
+  getOutstandingFeeReport
+);
+
 router.get(
   "/",
   authorize("ADMIN", "GUARDIAN"),

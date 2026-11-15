@@ -4,14 +4,27 @@ import api from "./services/api";
 import { useState, useEffect } from "react";
 import Students from "./Students";
 import ManagementPages from "./ManagementPages";
+import { GuardianDashboard, TeacherDashboard } from "./RoleDashboards";
 import {
   LayoutDashboard, Users, GraduationCap, BookOpen,
   CalendarCheck, ClipboardList, Wallet,
   Plus, ArrowUpRight, MoreHorizontal, Menu, X, LogOut
 } from "lucide-react";
 
-const navigation = [
+type ManagementPage = "Teachers" | "Classes & Subjects" | "Attendance" | "Examinations" | "Results" | "Fee Management";
+type AppPage = ManagementPage | "Dashboard" | "Teacher Dashboard" | "Guardian Dashboard" | "Students";
+type AppRole = LoginUser["role"];
+
+type NavigationItem = {
+  name: AppPage;
+  icon: typeof LayoutDashboard;
+  roles: AppRole[];
+};
+
+const navigation: NavigationItem[] = [
   { name: "Dashboard", icon: LayoutDashboard, roles: ["ADMIN"] },
+  { name: "Teacher Dashboard", icon: LayoutDashboard, roles: ["TEACHER"] },
+  { name: "Guardian Dashboard", icon: LayoutDashboard, roles: ["GUARDIAN"] },
   { name: "Students", icon: Users, roles: ["ADMIN", "TEACHER", "GUARDIAN"] },
   { name: "Teachers", icon: GraduationCap, roles: ["ADMIN"] },
   { name: "Classes & Subjects", icon: BookOpen, roles: ["ADMIN"] },
@@ -21,13 +34,26 @@ const navigation = [
   { name: "Fee Management", icon: Wallet, roles: ["ADMIN", "GUARDIAN"] },
 ];
 
-type NavigationItem = (typeof navigation)[number];
+const roleLandingPage = (role: string | undefined): AppPage => {
+  if (role === "ADMIN") return "Dashboard";
+  if (role === "TEACHER") return "Teacher Dashboard";
+  if (role === "GUARDIAN") return "Guardian Dashboard";
+  return "Dashboard";
+};
+
+const isManagementPage = (page: AppPage): page is ManagementPage =>
+  page === "Teachers" ||
+  page === "Classes & Subjects" ||
+  page === "Attendance" ||
+  page === "Examinations" ||
+  page === "Results" ||
+  page === "Fee Management";
 
 function SidebarContent({ currentUser, visibleNavigation, active, onNavigate }: {
   currentUser: LoginUser;
   visibleNavigation: NavigationItem[];
-  active: string;
-  onNavigate: (name: string) => void;
+  active: AppPage;
+  onNavigate: (name: AppPage) => void;
 }) {
   return (
     <>
@@ -73,10 +99,10 @@ function SidebarContent({ currentUser, visibleNavigation, active, onNavigate }: 
 
 function App() {
   const [currentYear] = useState(() => new Date().getFullYear());
-  const [active, setActive] = useState(() => {
+  const [active, setActive] = useState<AppPage>(() => {
     try {
       const savedUser = JSON.parse(localStorage.getItem("edu_user") || "null");
-      return savedUser?.role === "ADMIN" ? "Dashboard" : "Students";
+      return roleLandingPage(savedUser?.role);
     } catch {
       return "Dashboard";
     }
@@ -107,7 +133,11 @@ function App() {
 
     setToken(newToken);
     setCurrentUser(user);
-    setActive(user.role === "ADMIN" ? "Dashboard" : "Students");
+    setDashboardData(null);
+    setRecentStudents([]);
+    setDashboardError("");
+    setDashboardLoading(user.role === "ADMIN");
+    setActive(roleLandingPage(user.role));
   };
 
   const handleLogout = () => {
@@ -116,6 +146,9 @@ function App() {
 
     setToken(null);
     setCurrentUser(null);
+    setDashboardData(null);
+    setRecentStudents([]);
+    setDashboardError("");
     setActive("Dashboard");
   };
 
@@ -142,6 +175,8 @@ function App() {
         setRecentStudents(studentsResponse.data.data.slice(0, 5));
         setDashboardError("");
       } catch (error) {
+        setDashboardData(null);
+        setRecentStudents([]);
         setDashboardError(
           (error as { response?: { data?: { message?: string } } }).response?.data?.message ||
           "Unable to load current school data."
@@ -157,14 +192,14 @@ function App() {
   const stats = [
     {
       title: "Total Students",
-      value: dashboardLoading ? "..." : dashboardData?.totalStudents ?? 0,
+      value: dashboardLoading ? "..." : dashboardData ? dashboardData.totalStudents : "—",
       description: "Total registered students",
       icon: Users,
       color: "bg-indigo-50 text-indigo-600",
     },
     {
       title: "Total Teachers",
-      value: dashboardLoading ? "..." : dashboardData?.totalTeachers ?? 0,
+      value: dashboardLoading ? "..." : dashboardData ? dashboardData.totalTeachers : "—",
       description: "Total registered teachers",
       icon: GraduationCap,
       color: "bg-violet-50 text-violet-600",
@@ -173,7 +208,7 @@ function App() {
       title: "Attendance Rate",
       value: dashboardLoading
         ? "..."
-        : `${dashboardData?.attendanceRate ?? 0}%`,
+        : dashboardData ? `${dashboardData.attendanceRate}%` : "—",
       description: "Today's attendance",
       icon: CalendarCheck,
       color: "bg-emerald-50 text-emerald-600",
@@ -182,7 +217,7 @@ function App() {
       title: "Fee Collection",
       value: dashboardLoading
         ? "..."
-        : `₹${(dashboardData?.totalCollected ?? 0).toLocaleString("en-IN")}`,
+        : dashboardData ? `₹${dashboardData.totalCollected.toLocaleString("en-IN")}` : "—",
       description: "Total fees collected",
       icon: Wallet,
       color: "bg-amber-50 text-amber-600",
@@ -299,6 +334,14 @@ function App() {
           <div className="mx-auto max-w-[1600px] p-5 md:p-8">
             <Students canManage={currentUser.role === "ADMIN"} />
           </div>
+        ) : active === "Teacher Dashboard" && currentUser.role === "TEACHER" ? (
+          <div className="mx-auto max-w-[1600px] p-5 md:p-8">
+            <TeacherDashboard />
+          </div>
+        ) : active === "Guardian Dashboard" && currentUser.role === "GUARDIAN" ? (
+          <div className="mx-auto max-w-[1600px] p-5 md:p-8">
+            <GuardianDashboard />
+          </div>
         ) : active === "Dashboard" && currentUser.role === "ADMIN" ? (
           <div className="mx-auto max-w-[1600px] p-5 md:p-8">
             <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
@@ -389,7 +432,9 @@ function App() {
                 <div className="mt-5 flex items-center justify-between">
                   <div>
                     <p className="text-xs text-slate-400">Average attendance</p>
-                    <p className="mt-1 text-xl font-extrabold text-slate-800">{averageAttendance}%</p>
+                    <p className="mt-1 text-xl font-extrabold text-slate-800">
+                      {dashboardData ? `${averageAttendance}%` : "—"}
+                    </p>
                   </div>
                   <span className="text-xs text-slate-400">Based on recorded attendance</span>
                 </div>
@@ -408,12 +453,16 @@ function App() {
                 <div className="mt-7">
                   <p className="text-xs text-slate-400">Total collected</p>
                   <h3 className="mt-1 text-3xl font-extrabold text-slate-900">
-                    ₹{(dashboardData?.totalCollected ?? 0).toLocaleString("en-IN")}
+                    {dashboardData
+                      ? `₹${dashboardData.totalCollected.toLocaleString("en-IN")}`
+                      : "—"}
                   </h3>
                   <p className="mt-1 text-xs text-slate-500">
-                    {dashboardData?.totalFees > 0
-                      ? `${Math.round((dashboardData.totalCollected / dashboardData.totalFees) * 100)}% of invoiced fees collected`
-                      : "No fee invoices recorded"}
+                    {dashboardData
+                      ? dashboardData.totalFees > 0
+                        ? `${Math.round((dashboardData.totalCollected / dashboardData.totalFees) * 100)}% of invoiced fees collected`
+                        : "No fee invoices recorded"
+                      : "Fee totals are unavailable"}
                   </p>
                 </div>
 
@@ -421,15 +470,17 @@ function App() {
                   <div>
                     <div className="mb-2 flex justify-between text-xs">
                       <span className="font-medium text-slate-600">Collected</span>
-                      {dashboardData?.totalFees > 0
-                        ? Math.round((dashboardData.totalCollected / dashboardData.totalFees) * 100)
-                        : 0}%
+                      {dashboardData
+                        ? `${dashboardData.totalFees > 0
+                          ? Math.round((dashboardData.totalCollected / dashboardData.totalFees) * 100)
+                          : 0}%`
+                        : "—"}
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-slate-100">
                       <div
                         className="h-full rounded-full bg-indigo-600"
                         style={{
-                          width: `${dashboardData?.totalFees > 0
+                          width: `${dashboardData && dashboardData.totalFees > 0
                             ? (dashboardData.totalCollected / dashboardData.totalFees) * 100
                             : 0
                             }%`
@@ -442,16 +493,18 @@ function App() {
                     <div className="mb-2 flex justify-between text-xs">
                       <span className="font-medium text-slate-600">Outstanding</span>
                       <span className="font-bold text-slate-800">
-                        {dashboardData?.totalFees > 0
-                          ? Math.round((dashboardData.outstanding / dashboardData.totalFees) * 100)
-                          : 0}%
+                        {dashboardData
+                          ? `${dashboardData.totalFees > 0
+                            ? Math.round((dashboardData.outstanding / dashboardData.totalFees) * 100)
+                            : 0}%`
+                          : "—"}
                       </span>
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-slate-100">
                       <div
                         className="h-full rounded-full bg-amber-400"
                         style={{
-                          width: `${dashboardData?.totalFees > 0
+                          width: `${dashboardData && dashboardData.totalFees > 0
                             ? (dashboardData.outstanding / dashboardData.totalFees) * 100
                             : 0
                             }%`
@@ -555,7 +608,9 @@ function App() {
                 <div className="rounded-xl bg-indigo-50 p-3 text-indigo-600"><Users size={20} /></div>
                 <div>
                   <p className="text-xs font-bold text-slate-700">Classes</p>
-                  <p className="mt-1 text-[11px] text-slate-400">{dashboardData?.totalClasses ?? 0} classes configured</p>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    {dashboardData ? `${dashboardData.totalClasses} classes configured` : "Class totals unavailable"}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-4">
@@ -563,7 +618,9 @@ function App() {
                 <div>
                   <p className="text-xs font-bold text-slate-700">Outstanding Fees</p>
                   <p className="mt-1 text-[11px] text-slate-400">
-                    ₹{(dashboardData?.outstanding ?? 0).toLocaleString("en-IN")} pending
+                    {dashboardData
+                      ? `₹${dashboardData.outstanding.toLocaleString("en-IN")} pending`
+                      : "Fee totals unavailable"}
                   </p>
                 </div>
               </div>
@@ -573,9 +630,13 @@ function App() {
               © {currentYear} EduSphere School Management System.
             </footer>
           </div>
-        ) : (
+        ) : isManagementPage(active) ? (
           <div className="mx-auto max-w-[1600px] p-5 md:p-8">
-            <ManagementPages key={active} page={active as "Teachers" | "Classes & Subjects" | "Attendance" | "Examinations" | "Results" | "Fee Management"} role={currentUser.role} />
+            <ManagementPages key={active} page={active} role={currentUser.role} />
+          </div>
+        ) : (
+          <div role="alert" className="m-8 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            This dashboard is not available for your account.
           </div>
         )}
       </main>

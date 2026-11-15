@@ -81,6 +81,7 @@ Teacher creation example:
 |---|---|---|---|
 | POST | `/attendance` | Admin, teacher assigned to the class | Mark an attendance session |
 | GET | `/attendance` | Admin, assigned teacher, linked guardian | Filter with `classId`, `studentId`, and/or `date` |
+| GET | `/attendance/export.csv` | Admin, assigned teacher, linked guardian | Download authorized records as CSV; supports `classId`, `studentId`, `fromDate`, `toDate`, and `status` |
 | PUT | `/attendance/:id` | Admin, teacher assigned to the record's class | Correct a record |
 
 Mark attendance example:
@@ -106,6 +107,7 @@ Sessions are `MORNING` or `AFTERNOON`; status is `PRESENT`, `ABSENT`, or `LATE`.
 | DELETE | `/exams/:id` | Admin | Delete only if no results exist |
 | GET | `/results` | Admin, assigned teacher, linked guardian | List visible results; optional `examId` or `studentId` filters |
 | POST/PUT | `/results[/:id]` | Admin, teacher assigned to class and subject | Record or edit marks |
+| GET | `/results/students/:studentId/report-card` | Admin, teacher assigned to the student's class/subjects, linked guardian | Return student details and examination/subject marks, percentages, grades, and summary |
 
 Exam example:
 
@@ -133,14 +135,18 @@ Result example:
 
 The API calculates percentage and grade. Marks must be between zero and the exam maximum. Existing results prevent exam edits that would invalidate their class, subject, or maximum-mark basis.
 
+The report-card response can be rendered by the frontend and printed or saved as PDF from the browser print dialog; no server-generated PDF file is produced.
+
 ## Fees
 
 | Method | Route | Access | Purpose |
 |---|---|---|---|
-| GET | `/fees` | Admin, linked guardian | List invoices |
+| GET | `/fees` | Admin, linked guardian | List invoices; filter with `studentId`, `academicYear`, `feeType`, `status`, `fromDate`, and `toDate` (due date) |
 | POST | `/fees` | Admin | Create an invoice |
-| GET | `/fees/payments` | Admin, linked guardian | View payment history |
+| GET | `/fees/payments` | Admin, linked guardian | View payment history; filter with `studentId`, `feeId`, `paymentMethod`, `paymentFromDate`, and `paymentToDate` |
 | POST | `/fees/payment` | Admin | Record a payment |
+| GET | `/fees/reports/collection` | Admin, linked guardian | Invoice totals, current balances, year/category breakdown, and collections in the optional payment date range |
+| GET | `/fees/reports/outstanding` | Admin, linked guardian | Outstanding invoices and aggregate balance; accepts invoice filters |
 
 Invoice example:
 
@@ -167,13 +173,19 @@ Payment example:
 
 Payment methods are `CASH`, `UPI`, `CARD`, and `BANK_TRANSFER`. Amounts must be positive, have at most two decimal places, and not exceed the current balance. If supplied, a transaction ID is unique. Payment and invoice balance updates use a MongoDB transaction.
 
+For collection reports, `paymentFromDate` and `paymentToDate` bound the payment-ledger amount collected during the period. `fromDate` and `toDate` filter invoices by due date and the current outstanding report.
+
 ## Dashboard and health
 
 | Method | Route | Access | Purpose |
 |---|---|---|---|
 | GET | `/dashboard/stats` | Admin | Live counts, attendance summary, and fee totals |
+| GET | `/dashboard/teacher` | Teacher | Assigned classes/subjects, last-seven-days attendance activity, and upcoming examinations for assigned class/subject pairs |
+| GET | `/dashboard/guardian` | Guardian | Linked active students, their attendance summaries, recent results, and fee status |
 | GET | `/health` | Public | API health check |
 
-## API gaps
+Teacher and guardian dashboard responses are scoped from the authenticated account. These endpoints do not use query parameters to select a different teacher, class, or student. Guardian student IDs are obtained from the caller's `students.guardianIds` links; attendance, results, and fees are then queried only for those IDs.
 
-The current API does not expose a generated PDF report card, attendance export, general pagination, or fee collection filters by academic year/date. These are listed as future work in the [technical report](TECHNICAL_REPORT.md).
+## Remaining API limitations
+
+The API does not provide general pagination, a server-generated PDF report file, or tenant isolation. The report card is printable from the browser; the attendance export is CSV.
